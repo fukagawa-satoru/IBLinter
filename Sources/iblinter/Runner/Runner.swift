@@ -7,6 +7,7 @@
 
 import Foundation
 import PathKit
+import Files
 
 class IBLinterRunner {
     let ibLinterFile: Path
@@ -51,19 +52,46 @@ class IBLinterRunner {
             exit(1)
         }
 
-        let process = Process()
-        let swift = which("swift")
-        let arguments = [
+        let marathonPath = try! resolvePackages()
+        let artifactPaths = [".build/debug", ".build/release"]
+
+        var arguments = [
             "-L", dylib.string,
             "-I", dylib.string,
-            "-lIBLinterKit",
-            ibLinterFile.string
+            "-lIBLinterKit"
         ]
+        if let marathonLibPath = artifactPaths.map({ marathonPath + $0 }).first(where: { $0.exists }) {
+            arguments += [
+                "-L", marathonLibPath.string,
+                "-I", marathonLibPath.string,
+                "-lMarathonDependencies",
+            ]
+        }
+        arguments += [ibLinterFile.string]
+        let process = Process()
+        let swift = which("swift")
+
         process.launchPath = swift.string
         process.arguments = arguments
 
         process.launch()
         process.waitUntilExit()
         exit(process.terminationStatus)
+    }
+
+    func resolvePackages() throws -> Path {
+        let tmpFolder = ".iblinter-tmp"
+        let scriptManager = try getScriptManager(tmpFolder: tmpFolder)
+        let importExternalDeps = try ibLinterFile.read().components(separatedBy: .newlines)
+            .filter { $0.hasPrefix("import") && $0.contains("package: ") }
+        let tmpFileName = "_iblinter_imports.swift"
+        try Folder(path: tmpFolder).createFileIfNeeded(withName: tmpFileName)
+        let tmpFile = try File(path: "\(tmpFolder)/\(tmpFileName)")
+        try tmpFile.write(string: importExternalDeps.joined(separator: "\n"))
+
+        let script = try scriptManager.script(atPath: tmpFile.path, allowRemote: true)
+        try script.build()
+
+        return Path(script.folder.path)
     }
 }
