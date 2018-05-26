@@ -16,7 +16,7 @@ public protocol Rule {
 
 public struct Rules {
 
-    static var allRules: [Rule.Type] {
+    static var allRules: [Rule.Type] = {
         return [
             CustomClassNameRule.self,
             RelativeToMarginRule.self,
@@ -26,7 +26,7 @@ public struct Rules {
             StoryboardViewControllerId.self,
             ImageResourcesRule.self
         ]
-    }
+    }()
 
     static var defaultRules: [Rule.Type] {
         return [
