@@ -8,23 +8,12 @@
 import Foundation
 import PathKit
 import Files
+import IBLinterKit
 
 class IBLinterRunner {
-    let ibLinterFile: Path
-    init(ibLinterFile: Path) {
-        self.ibLinterFile = ibLinterFile
-    }
-
-    let potentialFolders = [
-        Path.current + "/Pods/IBLinter/lib",
-        Path("/usr/local/lib/iblinter")
-    ]
-
-    func dylibPath() -> Path? {
-        guard let libPath = potentialFolders.first(where: { ($0 + "libIBLinterKit.dylib").exists }) else {
-            return nil
-        }
-        return libPath
+    let ibLinterfile: Path
+    init(ibLinterfile: Path) {
+        self.ibLinterfile = ibLinterfile
     }
 
     func run() {
@@ -47,12 +36,12 @@ class IBLinterRunner {
             return Path.init(pathString)
         }
 
-        guard let dylib = dylibPath() else {
-            print("Could not find a libIBLinterKit to link against at any of: \(potentialFolders)")
+        guard let dylib = Runtime.dylibPath() else {
+            print("Could not find a libIBLinterKit to link against at any of: \(Runtime.potentialFolders)")
             exit(1)
         }
 
-        let marathonPath = try! resolvePackages()
+        let marathonPath = try! Runtime.resolvePackages(ibLinterfile: ibLinterfile)
         let artifactPaths = [".build/debug", ".build/release"]
 
         var arguments = [
@@ -67,9 +56,15 @@ class IBLinterRunner {
                 "-lMarathonDependencies",
             ]
         }
-        arguments += [ibLinterFile.string]
+        arguments += [ibLinterfile.string]
+        arguments += Array(CommandLine.arguments.dropFirst())
         let process = Process()
         let swift = which("swift")
+        let inputPipe = Pipe()
+        FileHandle.standardInput.writeabilityHandler = {
+            inputPipe.fileHandleForWriting.write($0.availableData)
+        }
+        process.standardInput = inputPipe
 
         process.launchPath = swift.string
         process.arguments = arguments
@@ -77,21 +72,5 @@ class IBLinterRunner {
         process.launch()
         process.waitUntilExit()
         exit(process.terminationStatus)
-    }
-
-    func resolvePackages() throws -> Path {
-        let tmpFolder = ".iblinter-tmp"
-        let scriptManager = try getScriptManager(tmpFolder: tmpFolder)
-        let importExternalDeps = try ibLinterFile.read().components(separatedBy: .newlines)
-            .filter { $0.hasPrefix("import") && $0.contains("package: ") }
-        let tmpFileName = "_iblinter_imports.swift"
-        try Folder(path: tmpFolder).createFileIfNeeded(withName: tmpFileName)
-        let tmpFile = try File(path: "\(tmpFolder)/\(tmpFileName)")
-        try tmpFile.write(string: importExternalDeps.joined(separator: "\n"))
-
-        let script = try scriptManager.script(atPath: tmpFile.path, allowRemote: true)
-        try script.build()
-
-        return Path(script.folder.path)
     }
 }
